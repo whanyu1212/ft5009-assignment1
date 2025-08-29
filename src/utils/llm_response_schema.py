@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field, RootModel
 from typing import List
 
 
-# ! Not being used because LLM checking against schema causes a major performance issue
+# ! Archived because LLM checking against schema causes a major performance issue
 class IndividualStock(BaseModel):
     """
     Represents a single constituent company of the S&P 500 index.
