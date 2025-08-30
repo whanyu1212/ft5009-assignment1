@@ -3,6 +3,7 @@ import pandas as pd
 import time
 from loguru import logger
 from typing import List, Union, Optional, Any
+from src.utils.schemas import MarketCapSchema
 
 
 class YFinanceLoader:
@@ -99,7 +100,9 @@ class YFinanceLoader:
             Optional[pd.DataFrame]: The latest OHLCV data as a DataFrame if found, None otherwise.
         """
         try:
-            ohlcv = yf.download(ticker, period="1d", interval="1m", auto_adjust=True)
+            ohlcv = yf.download(
+                ticker, period="1d", interval="1m", auto_adjust=True, progress=False
+            )
             # Fix the multi-level column issue
             ohlcv.columns = [i[0] for i in ohlcv.columns]
             ohlcv.reset_index(inplace=True)
@@ -164,4 +167,10 @@ class YFinanceLoader:
 
             market_caps.append({"symbol": ticker, "marketCap": market_cap})
 
-        return pd.DataFrame(market_caps)
+        df = pd.DataFrame(market_caps).dropna()
+        try:
+            MarketCapSchema.validate(df)
+            logger.info("Market cap data validation successful.")
+        except Exception as e:
+            logger.warning(f"Market cap data failed validation: {e}")
+        return df
