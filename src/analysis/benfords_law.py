@@ -5,6 +5,7 @@ import seaborn as sns
 from typing import Dict, List, Optional, Tuple, Union
 from scipy import stats
 from loguru import logger
+from src.utils.plotting import PlotBuilder
 
 
 class BenfordsLawAnalyzer:
@@ -22,6 +23,7 @@ class BenfordsLawAnalyzer:
         self.valid_data = None
 
     # === private methods ===
+
     # A bunch of calculations
 
     def _calculate_theoretical_distribution(self) -> Dict[int, float]:
@@ -31,6 +33,33 @@ class BenfordsLawAnalyzer:
             Dict[int, float]: Dictionary mapping first digits (1-9) to their expected probabilities
         """
         return {digit: np.log10(1 + 1 / digit) for digit in range(1, 10)}
+
+    def _calculate_observed_distribution(
+        self, first_digits: pd.Series
+    ) -> Dict[int, float]:
+        """Calculate the observed distribution of first digits.
+
+        Args:
+            first_digits (pd.Series): Series containing the first digits.
+
+        Returns:
+            Dict[int, float]: Dictionary mapping observed first digits to their proportions.
+        """
+        if first_digits.empty:
+            return {d: 0.0 for d in range(1, 10)}
+
+        digit_counts = first_digits.value_counts()
+        total_count = len(first_digits)
+
+        # Initialize observed distribution with all digits from 1 to 9 having a count of 0
+        observed_dist = {d: 0.0 for d in range(1, 10)}
+
+        # Update the distribution with the actual counts
+        for digit, count in digit_counts.items():
+            if 1 <= digit <= 9:
+                observed_dist[digit] = count / total_count
+
+        return observed_dist
 
     def _extract_first_digits(self, data: pd.Series) -> pd.Series:
         """Extract the first digits from a Series of numerical data.
@@ -198,13 +227,13 @@ class BenfordsLawAnalyzer:
 
         # MAD interpretation thresholds (commonly used in literature)
         if mad < 0.006:
-            conformity = "Close conformity"
+            conformity = "Low Dispersion: Indicates a very close fit to Benford's Law."
         elif mad < 0.012:
-            conformity = "Acceptable conformity"
+            conformity = "Acceptable Dispersion: Indicates a good fit to Benford's Law, typical for clean data."
         elif mad < 0.015:
-            conformity = "Marginally acceptable conformity"
+            conformity = "Marginal Dispersion: Suggests some deviation from Benford's Law, which may be acceptable."
         else:
-            conformity = "Nonconformity"
+            conformity = "High Dispersion: Indicates significant deviation from Benford's Law, suggesting potential data anomalies."
 
         return {
             "mad": mad,
@@ -282,16 +311,7 @@ class BenfordsLawAnalyzer:
         self.valid_data = first_digits
 
         # Calculate observed distribution
-        digit_counts = first_digits.value_counts().sort_index()
-        total_count = len(first_digits)
-        self.observed_distribution = {
-            digit: count / total_count for digit, count in digit_counts.items()
-        }
-
-        # Ensure all digits 1-9 are represented (with 0 probability if not observed)
-        for digit in range(1, 10):
-            if digit not in self.observed_distribution:
-                self.observed_distribution[digit] = 0.0
+        self.observed_distribution = self._calculate_observed_distribution(first_digits)
 
         # Perform statistical tests
         chi_square_result = self._chi_square_test(alpha=alpha)
@@ -345,3 +365,43 @@ class BenfordsLawAnalyzer:
                 results[field] = {"error": str(e)}
 
         return results
+
+    def plot_distribution(self, show_plot: bool = True) -> Optional[plt.Figure]:
+        """Plot the observed vs. theoretical Benford's Law distribution.
+
+        Args:
+            show_plot (bool, optional): Whether to display the plot. Defaults to True.
+
+        Raises:
+            ValueError: If the observed distribution is not available.
+
+        Returns:
+            Optional[plt.Figure]: The matplotlib figure object if show_plot is False.
+        """
+        if self.observed_distribution is None:
+            raise ValueError("Must run analyze() first to generate distributions.")
+
+        labels = list(self.theoretical_distribution.keys())
+        theoretical = list(self.theoretical_distribution.values())
+        observed = [self.observed_distribution.get(d, 0) for d in labels]
+
+        # Prepare data for side-by-side bar plot
+        data = {
+            "Digit": labels * 2,
+            "Proportion": observed + theoretical,
+            "Type": ["Observed"] * len(labels) + ["Theoretical"] * len(labels),
+        }
+        plot_df = pd.DataFrame(data)
+
+        plot_builder = PlotBuilder(figsize=(12, 7))
+        fig = (
+            plot_builder.with_title(f"Benford's Law Distribution for {self.field_name}")
+            .with_labels("First Digit", "Proportion")
+            .add_side_by_side_bars(data=plot_df, x="Digit", y="Proportion", hue="Type")
+            .build()
+        )
+
+        if show_plot:
+            plt.show()
+            return None
+        return fig
