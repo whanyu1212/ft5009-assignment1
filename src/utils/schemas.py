@@ -70,3 +70,27 @@ SP500ConstituentSchema = pa.DataFrameSchema(
     coerce=True,
     strict=True,
 )
+
+MarketCapSchema = pa.DataFrameSchema(
+    {
+        "symbol": pa.Column(
+            dtype=str,
+            nullable=False,
+            description="The ticker symbol for the security.",
+        ),
+        "marketCap": pa.Column(
+            dtype=float,
+            nullable=False,
+            checks=[
+                pa.Check(
+                    lambda s: s >= 0,
+                    element_wise=True,
+                    error="marketCap cannot be negative",
+                )
+            ],
+            description="The market capitalization of the company.",
+        ),
+    },
+    coerce=True,
+    strict=True,
+)
