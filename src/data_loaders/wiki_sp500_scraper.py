@@ -5,11 +5,15 @@ import pandas as pd
 from abc import ABC, abstractmethod
 from enum import Enum, auto
 from typing import List, Optional, Union
+from io import StringIO
 
+from loguru import logger
 from google import genai
 from google.genai import types
 from firecrawl import Firecrawl
 from dotenv import load_dotenv
+
+from src.utils.schemas import SP500ConstituentSchema
 
 load_dotenv()
 
@@ -18,7 +22,14 @@ _genai_client: Optional[genai.Client] = None
 
 
 def get_genai_client() -> genai.Client:
-    """Get or create a singleton Gemini AI client instance."""
+    """Get or create a singleton Gemini AI client instance.
+
+    Raises:
+        ValueError: If the GEMINI_API_KEY environment variable is not set.
+
+    Returns:
+        genai.Client: The Gemini AI client instance.
+    """
     global _genai_client
     if _genai_client is None:
         gemini_api_key = os.getenv("GEMINI_API_KEY")
@@ -26,6 +37,40 @@ def get_genai_client() -> genai.Client:
             raise ValueError("GEMINI_API_KEY environment variable is not set")
         _genai_client = genai.Client(api_key=gemini_api_key)
     return _genai_client
+
+
+def _validate_and_clean_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Validate and clean the DataFrame.
+
+    Args:
+        df (pd.DataFrame): The DataFrame to validate and clean.
+
+    Returns:
+        pd.DataFrame: The cleaned and validated DataFrame.
+    """
+    # Validate the DataFrame against the schema
+    validated_df = SP500ConstituentSchema.validate(df)
+    logger.info(
+        f"Successfully validated DataFrame with {len(validated_df)} rows against SP500ConstituentSchema"
+    )
+
+    # Log and drop missing values
+    missing_values = validated_df[validated_df.isnull().any(axis=1)]
+    if not missing_values.empty:
+        logger.info(
+            f"Found and dropped {len(missing_values)} rows with missing values."
+        )
+        logger.info(f"Missing rows:\n{missing_values}")
+        validated_df = validated_df.dropna()
+
+    # Log and drop duplicates
+    duplicates = validated_df[validated_df.duplicated()]
+    if not duplicates.empty:
+        logger.info(f"Found and dropped {len(duplicates)} duplicate rows.")
+        logger.info(f"Duplicate rows:\n{duplicates}")
+        validated_df = validated_df.drop_duplicates()
+
+    return validated_df
 
 
 class TableScraper(ABC):
@@ -62,6 +107,7 @@ class LLMTableScraper(TableScraper):
         processed_markdown_content = self._llm_process_markdown(markdown_content)
 
         df = pd.read_json(processed_markdown_content)
+        df = _validate_and_clean_df(df)
         return df
 
     def _scrape_static_website(self, url: str, format: List[str] = ["markdown"]) -> str:
@@ -169,9 +215,10 @@ class PandasTableScraper(TableScraper):
             }
             response = requests.get(url, headers=headers)
 
-            table = pd.read_html(response.text)
+            table = pd.read_html(StringIO(response.text))
             # ! The first table is what we want from this static page
             df = table[0]
+            df = _validate_and_clean_df(df)
             return df
         except Exception as e:
             raise Exception(f"An error occurred while scraping with pandas: {str(e)}")
